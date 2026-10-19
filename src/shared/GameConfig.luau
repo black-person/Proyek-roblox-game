@@ -28,7 +28,7 @@ GameConfig.Weapons = {
 	IronPipe = {
 		Name = "Pipa Besi",
 		Damage = 30,
-		MaxDurability = 5, 
+		MaxDurability = 25, 
 		LootChance = 0.30,
 	},
 	Sword = {
@@ -46,7 +46,7 @@ GameConfig.Weapons = {
 }
 
 GameConfig.Zombie = {
-	MaxHP = 500,
+	MaxHP = 100,
 	WalkSpeed = 12,
 	AttackDamage = 10,
 	AttackCooldown = 1.5,

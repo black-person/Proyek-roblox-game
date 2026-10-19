@@ -1,5 +1,5 @@
 --!strict
--- Lokasi: ServerScriptService/PlayerServerManager
+-- Lokasi: src/server/PlayerServerManager.server.luau
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,29 +7,61 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
-local gameConfigModule = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameConfig") :: ModuleScript
-local loadModule = require
-local GameConfig = loadModule(gameConfigModule)
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+-- 1. Cari GameConfig dengan aman (Tanpa membuat script berhenti jika folder berbeda nama)
+local SharedFolder = ReplicatedStorage:WaitForChild("Shared", 3)
+	or ReplicatedStorage:WaitForChild("shared", 3)
+	or ReplicatedStorage:FindFirstChild("Modules")
 
-local SprintEvent = Remotes:WaitForChild("SprintEvent") :: RemoteEvent
-local DodgeEvent = Remotes:WaitForChild("DodgeEvent") :: RemoteEvent
-local CombatEvent = Remotes:WaitForChild("CombatEvent") :: RemoteEvent
+local GameConfigModule = ((SharedFolder and SharedFolder:FindFirstChild("GameConfig"))
+	or ReplicatedStorage:FindFirstChild("GameConfig", true)) :: ModuleScript?
+
+if not GameConfigModule or not GameConfigModule:IsA("ModuleScript") then
+	error("[PlayerServerManager] KRITIS: GameConfig tidak ditemukan di ReplicatedStorage!")
+end
+
+local dynamicRequire = require :: (ModuleScript) -> any
+local GameConfig = dynamicRequire(GameConfigModule)
+
+-- 2. Pastikan Folder Remotes & semua RemoteEvent pasti ada dan tidak duplikat
+local Remotes = ReplicatedStorage:FindFirstChild("Remotes") :: Folder?
+if not Remotes then
+	local newRemotes = Instance.new("Folder")
+	newRemotes.Name = "Remotes"
+	newRemotes.Parent = ReplicatedStorage
+	Remotes = newRemotes
+end
+
+local function getOrCreateRemote(name: string): RemoteEvent
+	local existing = (Remotes :: Folder):FindFirstChild(name)
+	if existing and existing:IsA("RemoteEvent") then
+		return existing
+	end
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = Remotes
+	return remote
+end
+
+local SprintEvent = getOrCreateRemote("SprintEvent")
+local DodgeEvent = getOrCreateRemote("DodgeEvent")
+local CombatEvent = getOrCreateRemote("CombatEvent")
+
+print("[SERVER] PlayerServerManager Aktif & Siap Menerima Input!")
 
 local lastAttackTime: {[Player]: number} = {}
 local lastDodgeTime: {[Player]: number} = {}
 
--- Fungsi memunculkan angka Damage saja (tanpa teks nama senjata)
+-- Fungsi memunculkan angka Damage melayang di atas kepala Zombie
 local function showDamageIndicator(targetModel: Model, damageAmount: number)
 	local head = (targetModel:FindFirstChild("Head") or targetModel:FindFirstChild("HumanoidRootPart")) :: BasePart?
 	if not head then return end
-
+	
 	local bgui = Instance.new("BillboardGui")
 	bgui.Size = UDim2.fromOffset(90, 36)
 	bgui.StudsOffset = Vector3.new((math.random() - 0.5) * 2, 2.5, 0)
 	bgui.AlwaysOnTop = true
 	bgui.Parent = head
-
+	
 	local text = Instance.new("TextLabel")
 	text.Size = UDim2.fromScale(1, 1)
 	text.BackgroundTransparency = 1
@@ -37,14 +69,30 @@ local function showDamageIndicator(targetModel: Model, damageAmount: number)
 	text.TextColor3 = if damageAmount >= 50 then Color3.fromHex("#D9A441") else Color3.fromHex("#FF4444")
 	text.TextStrokeTransparency = 0
 	text.TextScaled = true
-	text.Text = string.format("-%d", damageAmount) -- Hanya angka damage
+	text.Text = string.format("-%d", damageAmount)
 	text.Parent = bgui
-
+	
 	local tween = TweenService:Create(bgui, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		StudsOffset = bgui.StudsOffset + Vector3.new(0, 3, 0)
 	})
 	tween:Play()
 	Debris:AddItem(bgui, 0.75)
+end
+
+-- Fungsi membuat efek visual garis peluru (Bullet Tracer) saat Pistol menembak
+local function createBulletTracer(startPos: Vector3, endPos: Vector3)
+	local dist = (endPos - startPos).Magnitude
+	local tracer = Instance.new("Part")
+	tracer.Name = "BulletTracer"
+	tracer.Anchored = true
+	tracer.CanCollide = false
+	tracer.CanQuery = false
+	tracer.Material = Enum.Material.Neon
+	tracer.Color = Color3.fromHex("#D9A441")
+	tracer.Size = Vector3.new(0.15, 0.15, dist)
+	tracer.CFrame = CFrame.lookAt(startPos, endPos) * CFrame.new(0, 0, -dist / 2)
+	tracer.Parent = workspace
+	Debris:AddItem(tracer, 0.08)
 end
 
 local function checkVIPGamePass(player: Player): boolean
@@ -88,7 +136,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	lastDodgeTime[player] = nil
 end)
 
--- 1. Handler Sprint
+-- ================= 1. HANDLER SPRINT =================
 SprintEvent.OnServerEvent:Connect(function(player: Player, wantsToSprint: unknown)
 	if typeof(wantsToSprint) ~= "boolean" then return end
 
@@ -103,7 +151,7 @@ SprintEvent.OnServerEvent:Connect(function(player: Player, wantsToSprint: unknow
 	humanoid.WalkSpeed = if wantsToSprint then GameConfig.Player.SprintSpeed else GameConfig.Player.WalkSpeed
 end)
 
--- 2. Handler Dodge
+-- ================= 2. HANDLER DODGE =================
 DodgeEvent.OnServerEvent:Connect(function(player: Player, moveDir: unknown)
 	if typeof(moveDir) ~= "Vector3" then return end
 
@@ -126,12 +174,19 @@ DodgeEvent.OnServerEvent:Connect(function(player: Player, moveDir: unknown)
 	local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
 	local dodgeDir = if flatDir.Magnitude > 0.1 then flatDir.Unit else rootPart.CFrame.LookVector
 
+	-- Dorongan cepat menggunakan AssemblyLinearVelocity + LinearVelocity agar 100% terasa di R6
+	rootPart.AssemblyLinearVelocity = Vector3.new(
+		dodgeDir.X * GameConfig.Player.DodgeSpeed,
+		rootPart.AssemblyLinearVelocity.Y,
+		dodgeDir.Z * GameConfig.Player.DodgeSpeed
+	)
+
 	local attachment = Instance.new("Attachment")
 	attachment.Parent = rootPart
 
 	local linearVel = Instance.new("LinearVelocity")
 	linearVel.Attachment0 = attachment
-	linearVel.MaxForce = 25000
+	linearVel.MaxForce = 50000
 	linearVel.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
 	linearVel.PrimaryTangentAxis = Vector3.new(1, 0, 0)
 	linearVel.SecondaryTangentAxis = Vector3.new(0, 0, 1)
@@ -150,7 +205,12 @@ DodgeEvent.OnServerEvent:Connect(function(player: Player, moveDir: unknown)
 	end)
 end)
 
+-- Fungsi mengenali jenis senjata
 local function getWeaponType(tool: Tool): string
+	local attrType = tool:GetAttribute("WeaponType")
+	if typeof(attrType) == "string" then
+		return attrType
+	end
 	local toolNameLower = string.lower(tool.Name)
 	if string.find(toolNameLower, "pipa") or string.find(toolNameLower, "ironpipe") then
 		return "IronPipe"
@@ -159,16 +219,11 @@ local function getWeaponType(tool: Tool): string
 	elseif string.find(toolNameLower, "pistol") then
 		return "Pistol"
 	end
-
-	local attrType = tool:GetAttribute("WeaponType")
-	if typeof(attrType) == "string" then
-		return attrType
-	end
 	return "Unarmed"
 end
 
--- 3. Handler Combat Event
-CombatEvent.OnServerEvent:Connect(function(player: Player, targetLookCFrame: unknown)
+-- ================= 3. HANDLER COMBAT (MELEE & PISTOL) =================
+CombatEvent.OnServerEvent:Connect(function(player: Player, aimOriginArg: unknown, aimDirArg: unknown)
 	local now = os.clock()
 	if lastAttackTime[player] and (now - lastAttackTime[player]) < (GameConfig.Player.AttackCooldown - 0.05) then
 		return
@@ -204,36 +259,43 @@ CombatEvent.OnServerEvent:Connect(function(player: Player, targetLookCFrame: unk
 		end
 	end
 
-	local hitAnyTarget = false
-
 	if isRanged and equippedTool then
-		-- ================= KASUS PISTOL (RAYCAST 20 STUDS) =================
+		-- ================= KASUS PISTOL: TEMBAKAN JARAK JAUH =================
 		local maxAmmo = GameConfig.Weapons.Pistol.MaxAmmo
 		local currentAmmo = (equippedTool:GetAttribute("Ammo") :: number?) or maxAmmo
-
+		
 		if currentAmmo <= 0 then
-			print("[COMBAT-PISTOL] Klik! Peluru Pistol habis (0/10)!")
+			print("[COMBAT] Peluru Pistol sudah habis (0/10)!")
 			return
 		end
-
+		
 		currentAmmo -= 1
 		equippedTool:SetAttribute("Ammo", currentAmmo)
 		equippedTool.Name = string.format("Pistol (%d/%d)", currentAmmo, maxAmmo)
 		equippedTool.ToolTip = string.format("Peluru: %d/%d", currentAmmo, maxAmmo)
-
-		local origin = rootPart.Position + Vector3.new(0, 1.5, 0)
-		local direction = rootPart.CFrame.LookVector * 20
-
-		if typeof(targetLookCFrame) == "CFrame" then
-			origin = targetLookCFrame.Position
-			direction = targetLookCFrame.LookVector * 20
+		
+		-- Hitung titik awal dan arah bidikan (ke posisi kursor mouse pemain)
+		local startPos = rootPart.Position + Vector3.new(0, 1.5, 0)
+		local rayDir = rootPart.CFrame.LookVector * 150
+		
+		if typeof(aimOriginArg) == "Vector3" and typeof(aimDirArg) == "Vector3" then
+			startPos = aimOriginArg
+			rayDir = aimDirArg.Unit * 150
+		elseif typeof(aimOriginArg) == "CFrame" then
+			startPos = aimOriginArg.Position
+			rayDir = aimOriginArg.LookVector * 150
 		end
 
 		local raycastParams = RaycastParams.new()
 		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 		raycastParams.FilterDescendantsInstances = {character}
 
-		local result = workspace:Raycast(origin, direction, raycastParams)
+		local result = workspace:Raycast(startPos, rayDir, raycastParams)
+		local endPos = if result then result.Position else (startPos + rayDir)
+		
+		-- Tampilkan garis peluru kuning dari tangan karakter ke titik tembak
+		createBulletTracer(rootPart.Position + Vector3.new(0, 1, 0), endPos)
+
 		if result and result.Instance then
 			local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
 			if hitModel then
@@ -241,7 +303,7 @@ CombatEvent.OnServerEvent:Connect(function(player: Player, targetLookCFrame: unk
 				if targetHumanoid and targetHumanoid.Health > 0 and not Players:GetPlayerFromCharacter(hitModel) then
 					targetHumanoid:TakeDamage(damage)
 					showDamageIndicator(hitModel, damage)
-					hitAnyTarget = true
+					print(string.format("[PISTOL] Mengenai %s (-%d HP)!", hitModel.Name, damage))
 				end
 			end
 		end
@@ -253,10 +315,11 @@ CombatEvent.OnServerEvent:Connect(function(player: Player, targetLookCFrame: unk
 		overlapParams.FilterDescendantsInstances = {character}
 
 		local hitboxCFrame = rootPart.CFrame * CFrame.new(0, 0, -(GameConfig.Player.AttackRange / 2))
-		local hitboxSize = Vector3.new(4.5, 5, GameConfig.Player.AttackRange)
+		local hitboxSize = Vector3.new(5, 5.5, GameConfig.Player.AttackRange)
 
 		local partsInBox = workspace:GetPartBoundsInBox(hitboxCFrame, hitboxSize, overlapParams)
 		local hitHumanoids: {[Humanoid]: boolean} = {}
+		local hitAnyTarget = false
 
 		for _, part in partsInBox do
 			local model = part:FindFirstAncestorOfClass("Model")
@@ -268,12 +331,12 @@ CombatEvent.OnServerEvent:Connect(function(player: Player, targetLookCFrame: unk
 						targetHumanoid:TakeDamage(damage)
 						showDamageIndicator(model, damage)
 						hitAnyTarget = true
+						print(string.format("[MELEE] Memukul %s dengan %s (-%d HP)!", model.Name, displayLabel, damage))
 					end
 				end
 			end
 		end
 
-		-- Kurangi durability Pipa Besi (25) / Pedang (40)
 		if hitAnyTarget and equippedTool and (weaponName == "IronPipe" or weaponName == "Sword") then
 			local maxDur = if weaponName == "IronPipe" then GameConfig.Weapons.IronPipe.MaxDurability else GameConfig.Weapons.Sword.MaxDurability
 			local currentDurability = (equippedTool:GetAttribute("Durability") :: number?) or maxDur
