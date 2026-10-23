@@ -7,7 +7,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
--- 1. Cari GameConfig dengan aman (Tanpa membuat script berhenti jika folder berbeda nama)
+--Cari GameConfig dengan aman 
 local SharedFolder = ReplicatedStorage:WaitForChild("Shared", 3)
 	or ReplicatedStorage:WaitForChild("shared", 3)
 	or ReplicatedStorage:FindFirstChild("Modules")
@@ -22,7 +22,7 @@ end
 local dynamicRequire = require :: (ModuleScript) -> any
 local GameConfig = dynamicRequire(GameConfigModule)
 
--- 2. Pastikan Folder Remotes & semua RemoteEvent pasti ada dan tidak duplikat
+--Memastikan Folder Remotes & semua RemoteEvent pasti ada dan tidak duplikat
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes") :: Folder?
 if not Remotes then
 	local newRemotes = Instance.new("Folder")
@@ -276,14 +276,14 @@ CombatEvent.OnServerEvent:Connect(function(player: Player, aimOriginArg: unknown
 		
 		-- Hitung titik awal dan arah bidikan (ke posisi kursor mouse pemain)
 		local startPos = rootPart.Position + Vector3.new(0, 1.5, 0)
-		local rayDir = rootPart.CFrame.LookVector * 150
+		local rayDir = rootPart.CFrame.LookVector * 50
 		
 		if typeof(aimOriginArg) == "Vector3" and typeof(aimDirArg) == "Vector3" then
 			startPos = aimOriginArg
-			rayDir = aimDirArg.Unit * 150
+			rayDir = aimDirArg.Unit * 50
 		elseif typeof(aimOriginArg) == "CFrame" then
 			startPos = aimOriginArg.Position
-			rayDir = aimOriginArg.LookVector * 150
+			rayDir = aimOriginArg.LookVector * 50
 		end
 
 		local raycastParams = RaycastParams.new()

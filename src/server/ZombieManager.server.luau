@@ -393,7 +393,7 @@ end)
 
 -- Spawn 3 Zombie Uji Coba saat game dimulai
 task.delay(2, function()
-	spawnZombie(Vector3.new(0, 5, -35), 1)
-	spawnZombie(Vector3.new(12, 5, -38), 2)
-	spawnZombie(Vector3.new(-12, 5, -38), 3)
+	spawnZombie(Vector3.new(-126, -225.5, 602), 1)
+	spawnZombie(Vector3.new(-100, -225.5, 602), 2)
+	spawnZombie(Vector3.new(-146, -225.5, 601), 3)
 end)

@@ -26,13 +26,13 @@ GameConfig.Player = {
 
 GameConfig.Weapons = {
 	IronPipe = {
-		Name = "Pipa Besi",
+		Name = "Iron Pipe",
 		Damage = 30,
 		MaxDurability = 25, 
-		LootChance = 0.30,
+		LootChance = 0.40,
 	},
 	Sword = {
-		Name = "Pedang",
+		Name = "Sword",
 		Damage = 60,
 		MaxDurability = 40,
 		LootChance = 0.05,
@@ -55,8 +55,8 @@ GameConfig.Zombie = {
 	DeaggroRadius = 45,
 	MaxActiveZombies = 20,
 	PathUpdateInterval = 0.4,
-	MedkitDropChance = 0.25,
-	MedkitHealAmount = 25,
+	MedkitDropChance = 0.30,
+	MedkitHealAmount = 25, 
 }
 
 GameConfig.GamePass = {
